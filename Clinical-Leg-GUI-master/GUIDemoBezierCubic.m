@@ -1,7 +1,4 @@
-% Author: Mark Yeatman
-% Written: Summer, 2016
-
-function GUIDemoBezierCubic(x , y )
+function GUIDemoHermiteCubic(x , y )
 %GUIDEMO A plot with a draggable point. 
 %   Proof of concept of idea of using splines to create a plot based of some original input data that a user can then manipulate.  
 %   Two points, one line
@@ -9,33 +6,21 @@ function GUIDemoBezierCubic(x , y )
     close all
     clc
     
-    %global variable declaration 
-    global Index Grabbed SourceData BezierData BezierCurve StartPoint EndPoint;
-
-    BezierCurve = BezierSpline(3);
-    Index = [];  %indexs of flattened weight array in BezierSpline
-    Grabbed = 0; %boolean 
-    SourceData = [x,y]; %Nx2
-    BezierData = [];%zeros(length(x),2);
-    StartPoint = [];
-    EndPoint = [];
+    global Index Grabbed SourceData KnotData;
+    Index = [];
+    KnotData = [];
+    Grabbed = 0;
+    SourceData = [x,y];
     
-    %Set up GUI buttons and figures
     H = figure('Position', [150 100 1100 800],'NumberTitle','off');
-    
-    % Create buttons and Register event handler functions
     SaveButton = uicontrol(H,'Style','pushbutton','String','Save',...
                 'Position',[50 20 60 40],'CallBack', {@SaveClick});
-    
-    StatsButton = uicontrol(H,'Style','pushbutton','String','Stats',...
-                'Position',[50 80 60 40],'CallBack', {@StatsClick});
             
     set(H, 'MenuBar','none');
     set(H,'ToolBar','none');
     set(H, 'Renderer','OpenGL');
     hold on
 
-    %Register event handlers for graph figure
     set(H,'WindowButtonMotionFcn',@MouseMove);
     set(H,'WindowButtonDownFcn',@MouseClick);
     %set(H,'WindowScrollWheelFcn',@MouseScroll);
@@ -45,224 +30,181 @@ function GUIDemoBezierCubic(x , y )
     SetupCurve();
 end
 
-function SetupCurve()
-    %set starting points
-    %set(gcf,'Pointer','FullCrossHair')
-    
-    %global SourceData BezierCurve BezierData I;   
-    
-    %Bezier Setup
-    %MxAllowSqD=0.1; % Max. allowed Square Distance between original and fitted data    
-    %[x,y,I]=BezierCurve.GenerateCurve(SourceData(:,1),SourceData(:,2),MxAllowSqD);
-    %BezierData = [x,y]; 
-    UpdateCurve();
-    
-end
-
-
 %Event functions 
 function MouseMove(~,~)
-    global Grabbed Index BezierCurve;
+    global Grabbed Index KnotData; %Grabbed MoveAlong Snap
     if Grabbed
-        KnotData = cell2mat(BezierCurve.Weights);
         CurrentPoints = get(gca,'CurrentPoint');
-%         if mod(Index,4) == 0 %Potential Double Knot Point
-%             if Index == 1 || Index == length(KnotData) % First or last point in entire set
-%                 KnotData(Index,1:2) = CurrentPoints(1,1:2);
-%             else    %is a double knot point
-%                 KnotData(Index,1:2) = CurrentPoints(1,1:2);
-%                 KnotData(Index+1,1:2) = CurrentPoints(1,1:2);
-%             end
-%         else
-%             KnotData(Index,1:2) = CurrentPoints(1,1:2);
-%         end
-        KnotData(Index,1:2) = CurrentPoints(1,1:2);  
-        BezierCurve.Weights = mat2cell(KnotData,ones(length(BezierCurve.Weights),1)*length(BezierCurve.Weights{1}),2);
+        KnotData(Index,1:2) = CurrentPoints(1,1:2);
         UpdateCurve();
     end
 end
 
 function MouseClick(~,~)
-    
-    global Grabbed Index StartPoint EndPoint BezierData BezierCurve I SourceData; 
-    
+    global Grabbed Index; %SelectMode Grabbed Snap Points Weights Xi Degree
     %Left Click
-    if strcmpi(get(gcf,'SelectionType'), 'Normal')     
-        
-        %Select Starting Point
-        if isempty(StartPoint)
-            StartPoint = FindClickedPoint();
-            
-        %Select Ending Point
-        elseif isempty(EndPoint)
-            EndPoint = FindClickedPoint();
-            MxAllowSqD=0.1; % Max. allowed Square Distance between original and fitted data    
-            [~,~,I]=BezierCurve.GenerateCurve(SourceData(StartPoint:EndPoint,1),SourceData(StartPoint:EndPoint,2),MxAllowSqD);
-            BezierCurve.RaiseTo(5);
-            [x,y,I]=BezierCurve.GenerateCurve(I);
-            save BezierCurve
-            BezierData = [x,y]; 
-        %Select Control Point
-        else                      
-            if Grabbed == false
-                
-                Index = FindClosest();
-                if Index == 0
-                    Grabbed = false;
-                else
-                    Grabbed = true;
-                end
-            else
-               Grabbed = false; 
-            end
-        end
+    if strcmpi(get(gcf,'SelectionType'), 'Normal')         
+        Grabbed = true;
+        Index = FindClosest();
+        set(gcf,'Pointer','Cross')
+    %Right Click
+    elseif strcmpi(get(gcf,'SelectionType'), 'Alt')
+        Grabbed = false;
     end
     UpdateCurve();
 end
 
 function SaveClick(~,~)
-    global BezierData BezierCurve;
-    save('SaveData','BezierData','BezierCurve');
+    global KnotData;
+    X = linspace(KnotData(1,1),KnotData(end,1),100);
+    Y = evalSpline(X,KnotData(:,1),KnotData(:,2),KnotData(:,3));
+    temp = [X;Y]';
+    save('SaveData','temp');
 end
 
-function StatsClick(~,~)
-    disp(Stats());
+%Sub functions 
+function [maxima] = findMaxs(x)
+%this function finds the indices of the maximums of a periodic function, where x is
+%a data set representing one period of the function. 
+    x = x(:);
+    % Identify whether signal is rising or falling
+    upordown = sign(diff(x));
+    % Find points where signal is rising before, falling after
+    maxflags = [upordown(1)<0; diff(upordown)<0; upordown(end)>0];
+    maxima_1   = find(maxflags);
+    maxima=maxima_1;
+    if length(maxima_1) > 1
+        shift = maxima_1(2);
+        x = circshift(x,shift);
+        % Identify whether signal is rising or falling
+        upordown = sign(diff(x));
+        % Find points where signal is rising before, falling after
+        maxflags = [upordown(1)<0; diff(upordown)<0; upordown(end)>0];
+        maxima_2   = find(maxflags);
+        maxima_2 = maxima_2 -shift;
+        for i=1:length(maxima_2)
+            if maxima_2(i)<=0
+                maxima_2(i)=length(x)+maxima_2(i);
+            end
+        end   
+        maxima = intersect(maxima_1,maxima_2);
+    end
 end
 
+function [ d ] = centDiff( points, xvals, yvals )
+%CENTDIFF Uses the central difference method to estimate derivative of a function given discrete sets of inputs and outputs. 
 
-%Event helper functions
-function UpdateCurve()
-%Plots points onto graph. 
-    global SourceData BezierData BezierCurve I StartPoint EndPoint;
-    cla;
-    
-    %Array of normalized RGB values. 
-    colors = [ 0.2,1,1
-               0.5,0.5,1;
-               1,0,1;
-               0,1,1;
-               1,0,0;
-               0,1,0;
-               0,0,1;
-               1,0.5,0.5;
-               0.3,0.8,0.4;
-               0.8,0.3,0.7];
-    
-    %Control Points
-    
-    for i=1:BezierCurve.NumOSplines
-        W = BezierCurve.Weights{i};
-        %for j= 1:length(W)
-            %if mod(j,length(W))==1
-             %   plot( W(j,1),W(j,2), '*', 'color' , 'black' );
-            %else
-                plot( W(3:4,1),W(3:4,2), '*', 'color' , colors(i,:) );
-            %end           
-        %end         
+%points, Nx1 array of input points to find derivative off
+%xvals, Mx1 function input values
+%yvals, Mx1 function output values
+    if( any(size(xvals)~= size(yvals)) || size(xvals,2)~=1 )
+        error('dimension function inputs and outputs arrays are incorrect');
     end
-    [x,y,I]=BezierCurve.GenerateCurve(I);
-    BezierData = [x,y];
-    %Spline and Source Data
-    
-    if ~isempty(StartPoint)
-        plot( SourceData(StartPoint,1),SourceData(StartPoint,2),'*','color','red');
+    d = zeros(1,length(points));
+    for i=1:length(points)
+        index = find(xvals == points(i),1);
+        d(i) = ( yvals(index+1)-yvals(index-1) ) / (  xvals(index+1)-xvals(index-1) );
     end
-    
-    if ~isempty(EndPoint)
-        plot( SourceData(EndPoint,1),SourceData(EndPoint,2),'*','color','red');
-    end    
-    
-    if ~isempty(BezierData)
-       plot( BezierData(:,1),BezierData(:,2),'linewidth',2,'color','green'); 
-    end
-    
-    if ~isempty(SourceData) && ~isempty(EndPoint)
-        plot( SourceData(1:StartPoint,1), SourceData(1:StartPoint,2),'color','blue');
-        plot( SourceData(StartPoint+1:EndPoint-1,1),SourceData(StartPoint+1:EndPoint-1,2),'--','color','blue');
-        plot( SourceData(EndPoint:end,1), SourceData(EndPoint:end,2),'color','blue');
-    else
-        plot( SourceData(:,1),SourceData(:,2),'color','blue');
-    end
+
 end
 
 function Index = FindClosest()
-%Calculates the ctrlpoint closest to where the user clicked. 
-    global BezierCurve SourceData;
-    msf = 0.005 ; %magic scale factor
-    maxAllowDistX =   msf*( max(SourceData(:,1)) - min(SourceData(:,1)) );
-    maxAllowDistY =   msf*( max(SourceData(:,2)) - min(SourceData(:,2)) );
-       
-    KnotData = cell2mat(BezierCurve.Weights);
+%Calculates the point in the plot data set closest to where the user
+%clicked. 
+    global KnotData;
+    
     CurrentPoint = get(gca,'CurrentPoint');
     Pt = CurrentPoint(1,1:2);
 
     Distances = zeros(1,length(KnotData));
 
     for P = 1:length(Distances)
-        diffVector = KnotData(P,1:2)-Pt;
-        %Scale vector so that calculation matches up with visual scale. 
-        diffVector(1) = diffVector(1)/( max(SourceData(:,1)) - min(SourceData(:,1))  );
-        diffVector(2) = diffVector(2)/( max(SourceData(:,2)) - min(SourceData(:,2)) );
-        
-        Distances(P) = norm(diffVector,2);
+        Distances(P) = norm( KnotData(P,1:2)-Pt, 2);
     end
     [~,Index] = min( Distances );
-    
-    %see selection area gaphically
-    %th = 0:pi/50:2*pi;
-    %xunit = maxAllowDistX * cos(th) + KnotData(3,1);
-    %yunit = maxAllowDistY * sin(th) + KnotData(3,2);
-    
-    %plot(xunit, yunit,Pt(1,1),Pt(1,2),'+');
-    
-    if (Index ~= 3 && Index ~= 4) || abs(KnotData(Index,1)-Pt(1,1)) > maxAllowDistX || abs(KnotData(Index,2)-Pt(1,2)) > maxAllowDistY  %cheat and only report on the middle ctrl points to hide end/intentional hidden points
-        Index = 0;
+end
+
+function RetData = CalcKnotData(Data)
+%This function descritizes input data into multiple splines, determines
+%starting and ending points of those splines, and estimates values of
+%the derivatives of the data at those points. 
+    KneeMaxs = findMaxs(Data(:,2));
+    KneeMins = findMaxs(-Data(:,2));
+    temp = sort([KneeMins;KneeMaxs]);
+    extrapoints = zeros(length(temp)-1,1);
+    %extra points are the half way points between local mins and maxs, so
+    %that a local min or max ends up as roughly the mid point of a spline.
+    %Ends up creating a spline for every local min or max.
+    for i=1:length(extrapoints)
+       extrapoints(i) = floor( ( temp(i) + temp(i+1) ) / 2 );
     end
+
+    temp = sort( [ temp ; extrapoints ] );
     
+    %Create Splines
+    kVals = centDiff(Data(temp,1),Data(:,1),Data(:,2)); %derivative values
+    xVals = Data(temp,1);
+    yVals = Data(temp,2);
+    RetData = [xVals,yVals,kVals'];
 end
 
-function Index = FindClickedPoint()
-%Calculates the point in the plot data set closest to where the user
-%clicked. 
-    global SourceData;
-    
-    CurrentPoint = get(gca,'CurrentPoint');
-    Pt = CurrentPoint(1,1:2);
+function [ q ] = evalSpline( x, xvals, yvals, kvals)
+%EVALSPLINE Acts as a cubic spline function, takes x values and returns
+%function evaluations. The function is defined a set of knots and
+%derivative values at those knots. 
 
-    Distances = zeros(1,length(SourceData));
-
-    for P = 1:length(Distances)
-        Distances(P) = norm( SourceData(P,1:2)-Pt, 2);
+%xvals, yvals, and kvals must be 1xn arrays
+%is a 1xM array
+%x inputs are sorted low to high
+%Copied and modified from http://blog.ivank.net/interpolation-with-cubic-splines.html
+    % find indices of enclosing knots 
+    indices = zeros(1,length(x));
+    q = zeros(1,length(x));
+    for j=1:length(x)
+        if(x(j)==xvals(1))
+            indices(j) = 2;
+        else
+            temp = find(xvals>=x(j));
+            if(isempty(temp))
+                error('x input value outside of range of xvals inputs')
+            end
+            indices(j) = temp(1); 
+        end
     end
+
+    %evaluate points
+    for j=1:length(x)
+    i= indices(j);
+    t = ( x(j)- xvals(i-1) ) / ( xvals(i) - xvals(i-1) );
+		
+    a =  kvals(i-1) * ( xvals(i) - xvals(i-1) ) - ( yvals(i) - yvals(i-1) );
+    b = -kvals(i)*(xvals(i)-xvals(i-1)) + (yvals(i)-yvals(i-1));
+		
+    q(j) = (1-t)*yvals(i-1) + t*yvals(i) + t*(1-t)*(a*(1-t)+b*t);
+    end
+end
+
+function SetupCurve()
+    %set starting points
+    set(gcf,'Pointer','FullCrossHair')
     
-    [~,Index] = min( Distances );
-
+    global SourceData KnotData;
+    KnotData = CalcKnotData(SourceData);    
+    UpdateCurve();
 end
 
-%Stat functions 
-function statdata = Stats()
-%Calculates goodness of fit statistics for current state of curve vs
-%original data
-%Returns a tab delimited string containing data
-    statdata ='no data calculated';
-    R2 = RSquared();
-    disp('R squared value');
-    R2
-end
-
-function output = RSquared()
-    output = 1 - ( SSresid() ./ SStotal() );
-end
-
-function output = SSresid()
-    global SourceData BezierData;
-    residual = zeros( length(SourceData(:,1)) ,2);
-    residual(:,2) = SourceData(:,2) - BezierData(:,2);
-    save residual;
-    output = sum(residual.^2);
-end
-
-function output = SStotal()
-    global SourceData;
-    output(1) = (length(SourceData(:,2))-1) * var(SourceData(:,2));
+function UpdateCurve()
+%Plots points onto graph. 
+    global SourceData KnotData;
+    cla;
+    %Control Points
+    plot( KnotData(:,1), KnotData(:,2), 'ko', 'MarkerSize', 12, 'MarkerFaceColor', [0 0 0] );
+    
+    %Source
+    plot( SourceData(:,1) ,SourceData(:,2));
+    
+    %Spline
+    X = linspace(KnotData(1,1),KnotData(end,1),100);
+    Y = evalSpline(X,KnotData(:,1),KnotData(:,2),KnotData(:,3));
+    plot( X, Y, 'Color', [255 128 0]/255, 'LineWidth', 3 );
 end
